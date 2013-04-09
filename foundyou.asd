@@ -4,4 +4,5 @@
   :author "Aad Versteden <aad@knowified.com>"
   :depends-on (jsown drakma)
   :license "MIT"
-  :components ((:file "foundyou")))
+  :components ((:file "package")
+	       (:file "foundyou")))
