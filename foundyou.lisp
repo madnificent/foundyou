@@ -85,4 +85,7 @@
      (flexi-streams:octets-to-string
       (drakma:http-request (format nil "http~:[~;s~]://maps.googleapis.com/maps/api/geocode/json"
 				   use-https-p)
-			   :parameters parameters)))))
+			   :parameters parameters
+			   :external-format-out :utf8
+			   :external-format-in :utf8)
+      :external-format :utf8))))
