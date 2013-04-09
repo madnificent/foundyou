@@ -9,10 +9,22 @@
   "Set this parameter to a non-nil value if you want to default to using https, instead of http for
    the requests to google.")
 
+(defparameter *default-bounds* nil
+  "The default bounds to use when performing requests")
+
+(defparameter *default-language* nil
+  "The default language to use when performing requests")
+
+(defparameter *default-region* nil
+  "The default region to use when performing requests")
+
 (defun call-google (&key
 		      (use-https-p *default-use-https-p*)
 		      (sensor *default-sensor*)
-		      address latitude longitude components)
+		      address latitude longitude components
+		      (bounds *default-bounds*)
+		      (language *default-language*)
+		      (region *default-region*))
   "Sends a call to google and returns the response, as parsed by JSOWN.
    You must supply either latitude AND longitude, or address AND/OR components.  Nil-values are
    considered as not supplying the value.
@@ -30,7 +42,19 @@
    - latitude :: should contain the latitude, either as a string, or as a number.  used when
                  reverse geocoding.
    - longitude :: should contained the longitude, either as a string, or as a number.  used when
-                  reverse geocoding."
+                  reverse geocoding.
+   the documentation for bounds, language and region is copied from the API at
+   https://developers.google.com/maps/documentation/geocoding/?hl=en#GeocodingRequests
+   they are optional
+   - bounds :: The bounding box of the viewport within which to bias geocode results more
+               prominently. This parameter will only influence, not fully restrict, results from the
+               geocoder. (For more information see Viewport Biasing below.)
+   - language :: The language in which to return results. See the list of supported domain
+                 languages. Note that we often update supported languages so this list may not be
+                 exhaustive. If language is not supplied, the geocoder will attempt to use the
+                 native language of the domain from which the request is sent wherever possible.
+   - region :: The region code, specified as a ccTLD (\"top-level domain\") two-character value.
+               This parameter will only influence, not fully restrict, results from the geocoder."
   (assert (alexandria:xor (or address components) (and latitude longitude))
 	  (address components latitude longitude)
 	  "Must supply either latitude AND longitude, or address AND/OR components.")
@@ -51,6 +75,12 @@
 		      (format nil "~{~A:~A~^|~}" (loop for k in (jsown:keywords components)
 						    append (list k (jsown:val components k))))))
 	    parameters))
+    (when bounds
+      (push (cons "bounds" bounds) parameters))
+    (when language
+      (push (cons "language" language) parameters))
+    (when region
+      (push (cons "region" region) parameters))
     (jsown:parse
      (flexi-streams:octets-to-string
       (drakma:http-request (format nil "http~:[~;s~]://maps.googleapis.com/maps/api/geocode/json"
