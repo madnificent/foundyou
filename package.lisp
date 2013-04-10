@@ -13,4 +13,11 @@
    #:*default-bounds*
    #:*default-language*
    #:*default-region*
-   #:reverse-geocode))
+   #:reverse-geocode
+   #:google-error
+   #:zero-results
+   #:over-query-limit
+   #:request-denied
+   #:invalid-request
+   #:unknown-error
+   #:unknown-status-error))

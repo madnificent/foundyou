@@ -29,6 +29,33 @@
 (defparameter *default-region* nil
   "The default region to use when performing requests")
 
+(define-condition google-error (error)
+  ()
+  (:documentation "Superclass of all Google Maps errors."))
+(define-condition zero-results (google-error)
+  ()
+  (:documentation "Indicates that the geocode was successful but returned no results. This may occur
+                   if the geocode was passed a non-existent address or a latlng in a remote
+                   location."))
+(define-condition over-query-limit (google-error)
+  ()
+  (:documentation "Indicates that you are over your quota."))
+(define-condition request-denied (google-error)
+  ()
+  (:documentation "Indicates that your request was denied, generally because of lack of a sensor
+                   parameter."))
+(define-condition invalid-request (google-error)
+  ()
+  (:documentation "Generally indicates that the query (address or latlng) is missing."))
+(define-condition unknown-error (google-error)
+  ()
+  (:documentation "Indicates that the request could not be processed due to a server error. The
+                   request may succeed if you try again."))
+(define-condition unknown-status-error (google-error)
+  ()
+  (:documentation "Indicates we received a non-\"OK\" status but with an error not currently
+                   described in the Google Maps V3 API."))
+
 (defun call-google-v3 (&key
 			 (use-https-p *default-use-https-p*)
 			 (sensor *default-sensor*)
@@ -99,14 +126,30 @@
       (push (cons "language" language) parameters))
     (when region
       (push (cons "region" region) parameters))
-    (jsown:parse
-     (flexi-streams:octets-to-string
-      (drakma:http-request (format nil "http~:[~;s~]://maps.googleapis.com/maps/api/geocode/json"
-				   use-https-p)
-			   :parameters parameters
-			   :external-format-out :utf8
-			   :external-format-in :utf8)
-      :external-format :utf8))))
+    (let* ((http-target (format nil "http~:[~;s~]://maps.googleapis.com/maps/api/geocode/json"
+				use-https-p))
+	   (response
+	    (jsown:parse
+	     (flexi-streams:octets-to-string
+	      (drakma:http-request http-target
+				   :parameters parameters
+				   :external-format-out :utf8
+				   :external-format-in :utf8)
+	      :external-format :utf8)))
+	   (response-status (jsown:val response "status")))
+      (cond ((string= response-status "ZERO_RESULTS")
+	     (error 'zero-results))
+	    ((string= response-status "OVER_QUERY_LIMIT")
+	     (error 'over-query-limit))
+	    ((string= response-status "REQUEST_DENIED")
+	     (error 'request-denied))
+	    ((string= response-status "INVALID_REQUEST")
+	     (error 'invalid-request))
+	    ((string= response-status "UNKNOWN_ERROR")
+	     (error 'unknown-error))
+	    ((string/= response-status "OK")
+	     (error 'unknown-status-error)))
+      response)))
 
 (defun geocode (search-string &rest args
 		&key
