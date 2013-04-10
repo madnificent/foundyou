@@ -12,4 +12,5 @@
    #:*default-use-https-p*
    #:*default-bounds*
    #:*default-language*
-   #:*default-region*))
+   #:*default-region*
+   #:reverse-geocode))

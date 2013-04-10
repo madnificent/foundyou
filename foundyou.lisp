@@ -54,12 +54,17 @@
                  reverse geocoding.
    - longitude :: should contained the longitude, either as a string, or as a number.  used when
                   reverse geocoding.
-   the documentation for bounds, language and region is copied from the API at
+   the documentation for bounds, language and region is mostly copied from the API at
    https://developers.google.com/maps/documentation/geocoding/?hl=en#GeocodingRequests
    they are optional
    - bounds :: The bounding box of the viewport within which to bias geocode results more
                prominently. This parameter will only influence, not fully restrict, results from the
-               geocoder. (For more information see Viewport Biasing below.)
+               geocoder.  You may supply this as a string, or as (list lat-ne lng-ne lat-sw lng-sw)
+               with the following meaning:
+               - lat-ne :: number containing northeast boundary latitude
+               - lng-ne :: number containing northeast boundary longitude
+               - lat-sw :: number containing southwest boundary latitude
+               - lng-sw :: number containing southwest boundary longitude
    - language :: The language in which to return results. See the list of supported domain
                  languages. Note that we often update supported languages so this list may not be
                  exhaustive. If language is not supplied, the geocoder will attempt to use the
@@ -75,10 +80,8 @@
   (let ((parameters `(("sensor" . ,(if sensor "true" "false")))))
     (when address
       (push (cons "address" address) parameters))
-    (when latitude
-      (push (cons "lat" latitude) parameters))
-    (when longitude
-      (push (cons "lng" longitude) parameters))
+    (when (and latitude longitude)
+      (push (cons "latlng" (format nil "~,10F,~,10F" latitude longitude)) parameters))
     (when components
       (push (cons "lng"
 		  (if (stringp components)
@@ -87,7 +90,11 @@
 						    append (list k (jsown:val components k))))))
 	    parameters))
     (when bounds
-      (push (cons "bounds" bounds) parameters))
+      (push (cons "bounds"
+		  (if (stringp bounds)
+		      bounds
+		      (format nil "~{~F,~F~^|~}" bounds)))
+	    parameters))
     (when language
       (push (cons "language" language) parameters))
     (when region
@@ -156,7 +163,7 @@
 (defun decode-geocode-result (jsown-geocoded-address)
   "This is a helper to decode the results which Google supplies us when geocoding an address.
    Decodes the geocoded JSOWN address <jsown-geocoded-address> and returns (list coords specificity
-   formatted-address). The meaning of these values is described in <geocode>."
+   formatted-address). The meaning of these values is described in #'geocode."
   (let ((geo (jsown:val jsown-geocoded-address "geometry")))
     (list (list (jsown:filter geo "location" "lat")
 		(jsown:filter geo "location" "lng"))
@@ -164,3 +171,89 @@
 	   (jsown:val geo "location_type"))
 	  (jsown:val jsown-geocoded-address "formatted_address"))))
 
+(defun reverse-geocode (latitude longitude &rest args
+			&key
+			  ;; keywords only listed for code hints
+			  (use-https-p *default-use-https-p*)
+			  (sensor *default-sensor*)
+			  (bounds *default-bounds*)
+			  (language *default-language*)
+			  (region *default-region*))
+  "Retrieves the address for a geo coordinate.  This is essentially the inverse of geocode.
+   - latitude :: latitude, as a number.
+   - longitude :: longitude, as a number.
+   Documentation about the keywords is listed in the docstring of #'call-google-v3.
+   Returns (values formatted-address address-plist address-short-plist
+                   result-jsown other-jsown-results).
+   - address-plist :: Plist which contains the following parsed information from <result-jsown>.
+                      Much of the following documentation is taken from the Google Maps V3 API
+                      documentation.  The mentioned name is the lisp keyword in the getf-able plist,
+                      following that is Google's documentation between brackets.  Not all possible
+                      information is captured.  The information captured in this plist is the long
+                      name.  The same information, in short-form is captured in address-plist-short.
+         - street-number :: [street_address] indicates a precise street address.
+         - street-name :: [route] indicates a named route (such as \"US 101\").
+         - country :: [country] indicates the national political entity, and is typically the
+                      highest order type returned by the Geocoder.
+         - area-level-1 :: [administrative_area_level_1] indicates a first-order civil entity
+                           below the country level. Within the United States, these administrative
+                           levels are states. Not all nations exhibit these administrative levels.
+         - area-level-2 :: [administrative_area_level_2] indicates a second-order civil entity below
+                           the country level. Within the United States, these administrative levels 
+                           are counties. Not all nations exhibit these administrative levels.
+         - area-level-3 :: [administrative_area_level_3] indicates a third-order civil entity below
+                           the country level. This type indicates a minor civil division. Not all
+                           nations exhibit these administrative levels.
+         - city :: [locality] indicates an incorporated city or town political entity.
+         - postal-code :: [postal_code] indicates a postal code as used to address postal mail
+                          within the country.
+   - address-plist-short :: the same basic information as address-plist, though here the short names
+                            are contained in the plist (vs the long names in address-plist).
+   - formatted-address :: A string, representing the address in a formatted form for the first
+                          address returned by Google.
+   - result-jsown :: Jsown representation of the first address returned by Google.  This is object
+                     contains all raw information and can be used in conjunction with the Google
+                     Maps V3 API.  See
+                     https://developers.google.com/maps/documentation/geocoding/?hl=en#Types for
+                     more information on its contents.
+   - other-jsown-results :: Unparsed version of the following found addresses for the given
+                            location.  This will be nil in almost all practical cases.  You may find
+                            the unexported function #'decode-reverse-geocode-result handy when
+                            handling these results."
+  (declare (ignore use-https-p sensor bounds language region))
+  (let ((res (apply #'call-google-v3 :latitude latitude :longitude longitude args)))
+    (apply #'values
+	   `(,@(decode-reverse-geocode-result (first (jsown:val res "results")))
+	     ,(first (jsown:val res "results"))
+	     ,(rest (jsown:val res "results"))))))
+
+(defparameter *address-component-name-map*
+  (alexandria:plist-hash-table '("street_address" :street-number
+				 "street_number" :street-number
+				 "route" :street-name
+				 "country" :country
+				 "administrative_area_level_1" :area-level-1
+				 "administrative_area_level_2" :area-level-2
+				 "administrative_area_level_3" :area-level-3
+				 "locality" :city
+				 "postal_code" :postal-code)
+			       :test 'equal)
+  "contains the mapping from Google's \"type\" tag in \"address_components\" to the lisp keyword we
+   want to use to identify that component in the address-plist returned by reverse-geocode.")
+
+(defun decode-reverse-geocode-result (jsown-reverse-geocoded-address)
+  "This is a helper to decode the results which Google supplies us when reverse-geocoding an
+   address.  Decodes the reverse-geocoded JSOWN address <jsown-reverse-geocoded-address> and
+   returns (list address-plist address-plist-short formatted-address) as described in
+   #'reverse-geocode."
+  (let (address-plist
+	address-plist-short)
+    (dolist (component (jsown:val jsown-reverse-geocoded-address "address_components"))
+      (dolist (type (jsown:val component "types"))
+	(let ((keyword (gethash type *address-component-name-map*)))
+	  (when keyword
+	    (setf (getf address-plist keyword) (jsown:val component "long_name"))
+	    (setf (getf address-plist-short keyword) (jsown:val component "short_name"))))))
+    (list address-plist
+	  address-plist-short
+	  (jsown:val jsown-reverse-geocoded-address "formatted_address"))))
